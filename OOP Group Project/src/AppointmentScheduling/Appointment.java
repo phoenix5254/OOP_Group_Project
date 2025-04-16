@@ -3,8 +3,10 @@ package AppointmentScheduling;
 import java.awt.*;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.text.SimpleDateFormat;
+//import java.text.SimpleDateFormat;
 import java.time.LocalTime;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.Scanner;
 
 import Dashboardpak.Dashboard;
@@ -25,6 +27,7 @@ public class Appointment {
     private Date appointmentDate;
     private String status;
     private static int slotNumber = 0;// to give each appointment a unique number
+    private static Queue<Integer> walkInQueue = new LinkedList<>();// to store walk-in patients
 
     public Appointment() {
         this.appointmentNumber = 0; // 4 bytes
@@ -218,6 +221,9 @@ public class Appointment {
         submitButton.addActionListener(e -> {
             int slot;
             try {
+                //Get the patient number from the user to set the appointment
+                System.out.print("Enter your Patient Number: ");
+                setPatientNumber(Integer.parseInt(appointmentNumberField.getText()));
                 // Parse the input slot number
                 slot = Integer.parseInt(appointmentNumberField.getText());
                 RandomAccessFile pen = new RandomAccessFile("appointment_times.txt", "rw");
@@ -229,7 +235,7 @@ public class Appointment {
                 char[] stat = new char[statusSize];
 
                 for (int i = 0; i < statusSize; i++) {
-                    stat[i] = pen.readChar();
+                    stat[i] = pen.readChar();//status
                 }
 
                 String statusFromFile = new String(stat);
@@ -237,7 +243,10 @@ public class Appointment {
                 // Check if appointment is valid
                 if (slot == apptNumber && statusFromFile.trim().equals(" ")) {
                     statusArea.setText("Appointment Scheduled Successfully!\n");
-
+                    if (!walkInQueue.isEmpty()) {
+                        int nextPatient = walkInQueue.poll();
+                        System.out.println("Next walk-in patient (Patient #" + nextPatient + ") can now be scheduled.");
+                    }
                     pen.seek((long) (slot - 1) * recordSize);
                     setAppointmentNumber(pen.readInt());
                     pen.writeInt(getPatientNumber());
@@ -256,15 +265,13 @@ public class Appointment {
                     Date appointmentDate = new Date(day, month, year);
                     setAppointmentDate(appointmentDate);
                     setStatus("Scheduled");
-
                     pen.writeChars("Scheduled");
 
                     int startTime = pen.readInt();
                     int endTime = pen.readInt();
                     statusArea.append("Time: " + startTime + " - " + endTime + "\n");
 
-                    Appointment appointment = new Appointment();
-                    appointment.displayAppointment();
+                    displayAppointment();
                 } else {
                     statusArea.setText("Not a valid appointment number.");
                 }
@@ -280,6 +287,39 @@ public class Appointment {
         frame.add(new JScrollPane(statusArea), BorderLayout.CENTER);
 
         frame.setVisible(true);
+    }
+    public void registerWalkIn() {
+        System.out.println("Registering patient " + getPatientNumber() + " as a walk-in...");
+        walkInQueue.offer(getPatientNumber());
+        System.out.println("You are added to the walk-in queue. Position: " + walkInQueue.size());
+    }
+    public void autoAssignWalkIn() {
+        RandomAccessFile pen = null;
+        try {
+            pen = new RandomAccessFile("appointment_times.txt", "rw");
+            while (!walkInQueue.isEmpty()) {
+                for (int i = 0; i < TotalRecords; i++) {
+                    pen.seek((i * recordSize) + 22);
+                    char[] statusChars = new char[statusSize];
+                    for (int s = 0; s < statusSize; s++) {
+                        statusChars[s] = pen.readChar();
+                    }
+                    String stat = new String(statusChars);
+                    if (stat.trim().equals("") || stat.trim().equals("Cancelled")) {
+                        int walkInPatient = walkInQueue.poll();
+                        pen.seek((i * recordSize) + 4);
+                        pen.writeInt(walkInPatient);
+                        pen.seek((i * recordSize) + 22);
+                        pen.writeChars(String.format("%-9s", "Walk-in"));
+                        System.out.println("Walk-in patient #" + walkInPatient + " assigned to slot #" + (i + 1));
+                        break;
+                    }
+                }
+            }
+            pen.close();
+        } catch (IOException e) {
+            System.out.println(e);
+        }
     }
 
     public void modifyAppointment(char choice) {
@@ -343,6 +383,9 @@ public class Appointment {
                     setStatus(newStatus);
                     pen.writeChars(choice == 'U' ? String.format("%-9s", newStatus) : " ");
                     statusArea.setText(choice == 'U' ? "Appointment status updated successfully!" : "Appointment cancelled successfully!");
+                    if (statusArea.getText().equals("Appointment cancelled successfully!")) {
+                        autoAssignWalkIn();
+                    }
                 }
 
                 pen.close();
@@ -538,8 +581,10 @@ public class Appointment {
                 for (int appt = 1; appt <= MAX_APPOINTMENTS; appt++) {
                     pen.seek((appt - 1) * recordSize);
                     pen.writeInt(appt);
-                    pen.writeChars(new SimpleDateFormat("dd-MM-yyyy").format(date));
+                    //pen.writeChars(new SimpleDateFormat("dd-MM-yyyy").format(date));
+                    // String.format("%02d-%02d-%04d", day, month, year));
                     pen.writeInt(timeSlots[appt - 1][0].getHour());
+                    pen.writeChars(String.format("%02d-%02d-%04d", date.getDay(), date.getMonth(), date.getYear()));
                     pen.writeInt(timeSlots[appt - 1][1].getHour());
                 }
                 pen.close();
